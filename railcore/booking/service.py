@@ -198,9 +198,16 @@ class BookingService:
             raise ValidationError("chart kind must be 'first' or 'final'")
 
     # ================================================================ queries
+    @staticmethod
+    def _parse(travel_class: str, quota: str) -> tuple[TravelClass, Quota]:
+        try:
+            return TravelClass.parse(travel_class), Quota.parse(quota)
+        except ValueError as exc:
+            raise ValidationError(str(exc)) from None
+
     def availability(self, train_number: str, start_date: date, travel_class: str, quota: str = "GN") -> str:
         train = self.network.train(train_number)
-        cls, q = TravelClass.parse(travel_class), Quota.parse(quota)
+        cls, q = self._parse(travel_class, quota)
         if not train.carries(cls):
             raise ValidationError(f"train {train_number} has no {cls.value} coaches")
         with self.repo.transaction():
@@ -210,7 +217,10 @@ class BookingService:
     def quote(self, train_number: str, start_date: date, from_station: str, to_station: str,
               travel_class: str, quota: str = "GN", passengers: int = 1) -> list[FareBreakdown]:
         train = self.network.train(train_number)
-        cls, q = TravelClass.parse(travel_class), Quota.parse(quota)
+        cls, q = self._parse(travel_class, quota)
+        if not train.carries(cls):
+            raise ValidationError(f"train {train_number} has no {cls.value} coaches")
+        self.rules.check_class(train, cls, q)
         pt_sold, pt_pool = 0, 0
         if q is Quota.PREMIUM_TATKAL:
             meta = self.repo.get_run(train_number, start_date)
