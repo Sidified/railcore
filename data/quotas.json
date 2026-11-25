@@ -1,0 +1,12 @@
+{
+  "_comment": "Berths per coach set aside for each quota. LD is per train and taken from the first coach only. RAC is the number of side-lower berths per coach that are sold as RAC (two passengers each).",
+  "SL": {"TQ": 16, "PT": 6, "SS": 6, "LD": 6, "RAC": 4, "WL_LIMIT": 400, "TQWL_LIMIT": 100},
+  "3A": {"TQ": 14, "PT": 4, "SS": 4, "LD": 4, "RAC": 2, "WL_LIMIT": 300, "TQWL_LIMIT": 60},
+  "3E": {"TQ": 14, "PT": 4, "SS": 4, "LD": 0, "RAC": 2, "WL_LIMIT": 200, "TQWL_LIMIT": 40},
+  "2A": {"TQ": 8,  "PT": 2, "SS": 3, "LD": 2, "RAC": 1, "WL_LIMIT": 200, "TQWL_LIMIT": 30},
+  "1A": {"TQ": 0,  "PT": 0, "SS": 2, "LD": 0, "RAC": 0, "WL_LIMIT": 30,  "TQWL_LIMIT": 0},
+  "FC": {"TQ": 0,  "PT": 0, "SS": 2, "LD": 0, "RAC": 0, "WL_LIMIT": 30,  "TQWL_LIMIT": 0},
+  "CC": {"TQ": 16, "PT": 6, "SS": 0, "LD": 4, "RAC": 0, "WL_LIMIT": 300, "TQWL_LIMIT": 60},
+  "EC": {"TQ": 8,  "PT": 2, "SS": 0, "LD": 0, "RAC": 0, "WL_LIMIT": 60,  "TQWL_LIMIT": 20},
+  "2S": {"TQ": 20, "PT": 0, "SS": 0, "LD": 6, "RAC": 0, "WL_LIMIT": 400, "TQWL_LIMIT": 100}
+}

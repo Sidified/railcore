@@ -1,0 +1,21 @@
+{
+  "_comment": "Booking, charting and cancellation policy used by RailCore. Times are IST. Based on the shape of the 2015 Refund Rules; see docs/RULES.md for what is a rule and what is a RailCore assumption.",
+  "advance_reservation_days": 60,
+  "max_passengers": {"GN": 6, "TQ": 4, "PT": 4, "LD": 6, "SS": 2},
+  "tatkal_open": {"ac": "10:00", "non_ac": "11:00"},
+  "tatkal_classes": ["2S", "SL", "3E", "3A", "CC", "2A", "EC"],
+  "senior_lower_berth_min_age": {"M": 60, "F": 45, "T": 60},
+  "first_chart_hours_before": 8,
+  "final_chart_minutes_before": 30,
+  "cancellation": {
+    "flat_charge": {"1A": "240", "EC": "240", "2A": "200", "FC": "200", "3A": "180", "CC": "180", "3E": "180", "SL": "120", "2S": "60"},
+    "windows": [
+      {"from_hours": 48, "kind": "flat"},
+      {"from_hours": 12, "kind": "percent", "percent": "25"},
+      {"from_hours": 4, "kind": "percent", "percent": "50"}
+    ],
+    "clerkage": "60",
+    "rac_wl_cutoff_minutes": 30,
+    "gst_on_charges_ac_percent": "5"
+  }
+}

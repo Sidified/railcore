@@ -1,0 +1,33 @@
+{
+  "_comment": "RailCore sample tariff. Shaped like the Indian Railways tariff (telescopic per-km rates, fixed charges, Tatkal and GST) but the numbers are illustrative, not the official tariff.",
+  "slabs_km": [300, 1000, 2500],
+  "rate_per_km": {
+    "2S": ["0.30", "0.25", "0.20", "0.17"],
+    "SL": ["0.55", "0.48", "0.40", "0.35"],
+    "3E": ["1.30", "1.15", "1.00", "0.90"],
+    "3A": ["1.45", "1.28", "1.10", "1.00"],
+    "CC": ["1.20", "1.05", "0.92", "0.85"],
+    "2A": ["2.10", "1.85", "1.60", "1.45"],
+    "FC": ["1.80", "1.60", "1.40", "1.25"],
+    "1A": ["3.50", "3.10", "2.70", "2.40"],
+    "EC": ["2.60", "2.30", "2.00", "1.80"]
+  },
+  "min_distance_km": {"2S": 50, "SL": 200, "3E": 300, "3A": 300, "CC": 50, "2A": 300, "FC": 100, "1A": 300, "EC": 50},
+  "reservation_charge": {"2S": "15", "SL": "20", "3E": "40", "3A": "40", "CC": "40", "2A": "50", "FC": "50", "1A": "60", "EC": "60"},
+  "superfast_charge": {"2S": "15", "SL": "30", "3E": "45", "3A": "45", "CC": "45", "2A": "45", "FC": "45", "1A": "75", "EC": "75"},
+  "superfast_train_types": ["SUPERFAST", "RAJDHANI", "SHATABDI"],
+  "tatkal": {
+    "percent_of_base": {"2S": "10", "SL": "30", "3E": "30", "3A": "30", "CC": "30", "2A": "30", "EC": "30"},
+    "min_charge": {"2S": "10", "SL": "100", "3E": "275", "3A": "300", "CC": "125", "2A": "400", "EC": "400"},
+    "max_charge": {"2S": "15", "SL": "200", "3E": "375", "3A": "400", "CC": "225", "2A": "500", "EC": "500"},
+    "min_distance_km": {"2S": 100, "SL": 500, "3E": 250, "3A": 250, "CC": 250, "2A": 500, "EC": 250}
+  },
+  "premium_tatkal_bands": [
+    {"sold_below_percent": 25, "multiplier": "1.00"},
+    {"sold_below_percent": 50, "multiplier": "1.25"},
+    {"sold_below_percent": 75, "multiplier": "1.50"},
+    {"sold_below_percent": 101, "multiplier": "2.00"}
+  ],
+  "gst_percent_ac": "5",
+  "round_total_up_to": 5
+}

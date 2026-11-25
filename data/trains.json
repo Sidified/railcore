@@ -1,0 +1,61 @@
+[
+  {
+    "number": "22401",
+    "name": "Satpura Superfast",
+    "type": "SUPERFAST",
+    "runs_on": ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"],
+    "stops": [
+      {"station": "NDLS", "arr": null,    "dep": "20:00", "day": 0, "km": 0},
+      {"station": "AGC",  "arr": "22:40", "dep": "22:45", "day": 0, "km": 195},
+      {"station": "GWL",  "arr": "00:30", "dep": "00:35", "day": 1, "km": 313},
+      {"station": "JHS",  "arr": "01:50", "dep": "02:00", "day": 1, "km": 410},
+      {"station": "BPL",  "arr": "06:10", "dep": "06:20", "day": 1, "km": 701},
+      {"station": "ET",   "arr": "07:50", "dep": "07:55", "day": 1, "km": 793},
+      {"station": "NGP",  "arr": "12:30", "dep": null,    "day": 1, "km": 1090}
+    ],
+    "composition": {"SL": 6, "3A": 4, "3E": 1, "2A": 2, "1A": 1, "2S": 1}
+  },
+  {
+    "number": "12099",
+    "name": "Narmada Rajdhani",
+    "type": "RAJDHANI",
+    "runs_on": ["MON", "WED", "FRI"],
+    "stops": [
+      {"station": "NDLS", "arr": null,    "dep": "16:00", "day": 0, "km": 0},
+      {"station": "JHS",  "arr": "20:30", "dep": "20:35", "day": 0, "km": 410},
+      {"station": "BPL",  "arr": "00:45", "dep": "00:55", "day": 1, "km": 701},
+      {"station": "ET",   "arr": "02:25", "dep": "02:30", "day": 1, "km": 793},
+      {"station": "JBP",  "arr": "06:30", "dep": null,    "day": 1, "km": 1038}
+    ],
+    "composition": {"3A": 6, "2A": 3, "1A": 1}
+  },
+  {
+    "number": "12001",
+    "name": "Bhopal Shatabdi",
+    "type": "SHATABDI",
+    "runs_on": ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"],
+    "stops": [
+      {"station": "NDLS", "arr": null,    "dep": "06:00", "day": 0, "km": 0},
+      {"station": "AGC",  "arr": "07:50", "dep": "07:55", "day": 0, "km": 195},
+      {"station": "GWL",  "arr": "09:20", "dep": "09:22", "day": 0, "km": 313},
+      {"station": "JHS",  "arr": "10:35", "dep": "10:40", "day": 0, "km": 410},
+      {"station": "BPL",  "arr": "14:25", "dep": null,    "day": 0, "km": 701}
+    ],
+    "composition": {"CC": 6, "EC": 1}
+  },
+  {
+    "number": "11071",
+    "name": "Kamayani Express",
+    "type": "MAIL_EXP",
+    "runs_on": ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"],
+    "stops": [
+      {"station": "CSMT", "arr": null,    "dep": "11:05", "day": 0, "km": 0},
+      {"station": "MMR",  "arr": "15:30", "dep": "15:35", "day": 0, "km": 258},
+      {"station": "BSL",  "arr": "18:30", "dep": "18:35", "day": 0, "km": 443},
+      {"station": "ET",   "arr": "23:40", "dep": "23:45", "day": 0, "km": 744},
+      {"station": "BPL",  "arr": "01:20", "dep": "01:25", "day": 1, "km": 836},
+      {"station": "JHS",  "arr": "06:15", "dep": null,    "day": 1, "km": 1127}
+    ],
+    "composition": {"SL": 8, "3A": 3, "2A": 1, "2S": 2}
+  }
+]

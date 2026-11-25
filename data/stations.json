@@ -1,0 +1,13 @@
+[
+  {"code": "NDLS", "name": "New Delhi"},
+  {"code": "AGC", "name": "Agra Cantt"},
+  {"code": "GWL", "name": "Gwalior Jn"},
+  {"code": "JHS", "name": "Jhansi Jn"},
+  {"code": "BPL", "name": "Bhopal Jn"},
+  {"code": "ET", "name": "Itarsi Jn"},
+  {"code": "NGP", "name": "Nagpur Jn"},
+  {"code": "JBP", "name": "Jabalpur Jn"},
+  {"code": "CSMT", "name": "Mumbai CSMT"},
+  {"code": "MMR", "name": "Manmad Jn"},
+  {"code": "BSL", "name": "Bhusaval Jn"}
+]
