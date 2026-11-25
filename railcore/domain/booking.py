@@ -103,6 +103,11 @@ class Booking:
     quota: Quota
     booked_at: datetime
     passengers: list[PassengerRecord] = field(default_factory=list)
+    boarding_station: str | None = None  # set when the passenger changes the boarding point
+
+    @property
+    def boards_at(self) -> str:
+        return self.boarding_station or self.from_station
 
     @property
     def state(self) -> BookingState:

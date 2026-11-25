@@ -9,6 +9,7 @@ from datetime import date
 from ..domain.booking import Booking
 from ..domain.classes import TravelClass
 from ..events import Event
+from ..tdr.models import TDR
 from .base import RunMeta
 
 
@@ -18,15 +19,30 @@ class InMemoryRepository:
         self._runs: dict[tuple[str, date], RunMeta] = {}
         self._events: list[Event] = []
         self._pnr_seq = 0
+        self._tdrs: dict[int, TDR] = {}
+        self._tdr_seq = 0
+        self._idempotency: dict[str, str] = {}
+        self._depth = 0
+
+    def _state(self):
+        return (copy.deepcopy(self._bookings), copy.deepcopy(self._runs), list(self._events), self._pnr_seq,
+                copy.deepcopy(self._tdrs), self._tdr_seq, dict(self._idempotency))
 
     @contextmanager
     def transaction(self):
-        saved = (copy.deepcopy(self._bookings), copy.deepcopy(self._runs), list(self._events), self._pnr_seq)
+        """Nested-safe: only the outermost block takes a snapshot and rolls back."""
+        outer = self._depth == 0
+        saved = self._state() if outer else None
+        self._depth += 1
         try:
             yield
         except BaseException:
-            self._bookings, self._runs, self._events, self._pnr_seq = saved
+            if outer:
+                (self._bookings, self._runs, self._events, self._pnr_seq,
+                 self._tdrs, self._tdr_seq, self._idempotency) = saved
             raise
+        finally:
+            self._depth -= 1
 
     def next_pnr_sequence(self) -> int:
         self._pnr_seq += 1
@@ -59,3 +75,25 @@ class InMemoryRepository:
 
     def events(self, after_seq: int = 0, limit: int = 1000) -> list[Event]:
         return [e for e in self._events if e.seq > after_seq][:limit]
+
+    def next_tdr_id(self) -> int:
+        self._tdr_seq += 1
+        return self._tdr_seq
+
+    def save_tdr(self, tdr: TDR) -> None:
+        self._tdrs[tdr.id] = copy.deepcopy(tdr)
+
+    def get_tdr(self, tdr_id: int) -> TDR | None:
+        found = self._tdrs.get(tdr_id)
+        return copy.deepcopy(found) if found else None
+
+    def tdrs_for_pnr(self, pnr: str) -> list[TDR]:
+        return [copy.deepcopy(t) for t in sorted(self._tdrs.values(), key=lambda t: t.id) if t.pnr == pnr]
+
+    def idempotent_pnr(self, key: str) -> str | None:
+        return self._idempotency.get(key)
+
+    def remember_idempotent(self, key: str, pnr: str) -> None:
+        if key in self._idempotency:
+            raise KeyError(f"idempotency key {key!r} already used")
+        self._idempotency[key] = pnr

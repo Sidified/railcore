@@ -17,6 +17,7 @@ from ..domain.classes import BerthType, TravelClass
 from ..domain.quota import Quota, WaitlistType
 from ..events import Event
 from ..inventory import ChartState
+from ..tdr.models import TDR, TDRReason, TDRStatus
 from .base import RunMeta
 
 MIGRATIONS: list[tuple[int, str]] = [
@@ -68,6 +69,34 @@ MIGRATIONS: list[tuple[int, str]] = [
             payload  TEXT NOT NULL
         );
         CREATE INDEX events_type ON events (type);
+    """),
+    (4, """
+        ALTER TABLE bookings ADD COLUMN boarding_station TEXT;
+        ALTER TABLE runs ADD COLUMN cancelled INTEGER NOT NULL DEFAULT 0;
+        CREATE TABLE run_delays (
+            train_number TEXT NOT NULL,
+            start_date   TEXT NOT NULL,
+            station      TEXT NOT NULL,
+            arr_delay    INTEGER NOT NULL,
+            dep_delay    INTEGER NOT NULL,
+            PRIMARY KEY (train_number, start_date, station)
+        );
+    """),
+    (5, """
+        CREATE TABLE tdrs (
+            id          INTEGER PRIMARY KEY,
+            pnr         TEXT NOT NULL REFERENCES bookings (pnr),
+            passengers  TEXT NOT NULL,
+            reason      TEXT NOT NULL,
+            filed_at    TEXT NOT NULL,
+            status      TEXT NOT NULL,
+            claimed     TEXT NOT NULL,
+            note        TEXT NOT NULL,
+            settled_at  TEXT
+        );
+        CREATE INDEX tdrs_pnr ON tdrs (pnr);
+        CREATE TABLE idempotency_keys (key TEXT PRIMARY KEY, pnr TEXT NOT NULL REFERENCES bookings (pnr));
+        INSERT INTO counters VALUES ('tdr', 0);
     """),
 ]
 
@@ -155,10 +184,12 @@ class SQLiteRepository:
     def save_booking(self, booking: Booking) -> None:
         with self.transaction():
             self._conn.execute(
-                "INSERT INTO bookings VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(pnr) DO NOTHING",
+                "INSERT INTO bookings (pnr, train_number, start_date, from_station, to_station, travel_class,"
+                " quota, booked_at, boarding_station) VALUES (?,?,?,?,?,?,?,?,?)"
+                " ON CONFLICT(pnr) DO UPDATE SET boarding_station = excluded.boarding_station",
                 (booking.pnr, booking.train_number, booking.start_date.isoformat(), booking.from_station,
                  booking.to_station, booking.travel_class.value, booking.quota.value,
-                 booking.booked_at.isoformat()),
+                 booking.booked_at.isoformat(), booking.boarding_station),
             )
             for p in booking.passengers:
                 pax = p.passenger
@@ -180,6 +211,7 @@ class SQLiteRepository:
             from_station=row["from_station"], to_station=row["to_station"],
             travel_class=TravelClass(row["travel_class"]), quota=Quota(row["quota"]),
             booked_at=datetime.fromisoformat(row["booked_at"]),
+            boarding_station=row["boarding_station"],
         )
         for p in self._conn.execute("SELECT * FROM passengers WHERE pnr = ? ORDER BY idx", (row["pnr"],)):
             booking.passengers.append(PassengerRecord(
@@ -213,14 +245,26 @@ class SQLiteRepository:
     def get_run(self, train_number: str, start_date: date) -> RunMeta:
         row = self._conn.execute("SELECT * FROM runs WHERE train_number = ? AND start_date = ?",
                                  (train_number, start_date.isoformat())).fetchone()
+        delays = {
+            r["station"]: (r["arr_delay"], r["dep_delay"])
+            for r in self._conn.execute("SELECT * FROM run_delays WHERE train_number = ? AND start_date = ?",
+                                        (train_number, start_date.isoformat()))
+        }
         if row is None:
-            return RunMeta(train_number, start_date)
-        return RunMeta(train_number, start_date, ChartState(row["chart"]))
+            return RunMeta(train_number, start_date, delays=delays)
+        return RunMeta(train_number, start_date, ChartState(row["chart"]), bool(row["cancelled"]), delays)
 
     def save_run(self, meta: RunMeta) -> None:
+        day = meta.start_date.isoformat()
         with self.transaction():
-            self._conn.execute("INSERT OR REPLACE INTO runs VALUES (?,?,?)",
-                               (meta.train_number, meta.start_date.isoformat(), meta.chart.value))
+            self._conn.execute(
+                "INSERT OR REPLACE INTO runs (train_number, start_date, chart, cancelled) VALUES (?,?,?,?)",
+                (meta.train_number, day, meta.chart.value, int(meta.cancelled)))
+            self._conn.execute("DELETE FROM run_delays WHERE train_number = ? AND start_date = ?",
+                               (meta.train_number, day))
+            for station, (arr, dep) in meta.delays.items():
+                self._conn.execute("INSERT INTO run_delays VALUES (?,?,?,?,?)",
+                                   (meta.train_number, day, station, arr, dep))
 
     # ------------------------------------------------------------------- events
     def append_event(self, event: Event) -> Event:
@@ -232,3 +276,43 @@ class SQLiteRepository:
     def events(self, after_seq: int = 0, limit: int = 1000) -> list[Event]:
         rows = self._conn.execute("SELECT * FROM events WHERE seq > ? ORDER BY seq LIMIT ?", (after_seq, limit))
         return [Event(r["type"], datetime.fromisoformat(r["at"]), json.loads(r["payload"]), r["seq"]) for r in rows]
+
+    # --------------------------------------------------------------------- TDRs
+    def next_tdr_id(self) -> int:
+        with self.transaction():
+            self._conn.execute("UPDATE counters SET value = value + 1 WHERE name = 'tdr'")
+            return self._conn.execute("SELECT value FROM counters WHERE name = 'tdr'").fetchone()[0]
+
+    def save_tdr(self, tdr: TDR) -> None:
+        with self.transaction():
+            self._conn.execute(
+                "INSERT OR REPLACE INTO tdrs VALUES (?,?,?,?,?,?,?,?,?)",
+                (tdr.id, tdr.pnr, json.dumps(tdr.passengers), tdr.reason.value, tdr.filed_at.isoformat(),
+                 tdr.status.value, json.dumps({str(k): str(v) for k, v in tdr.claimed.items()}), tdr.note,
+                 tdr.settled_at.isoformat() if tdr.settled_at else None))
+
+    @staticmethod
+    def _tdr(row: sqlite3.Row) -> TDR:
+        return TDR(
+            id=row["id"], pnr=row["pnr"], passengers=json.loads(row["passengers"]),
+            reason=TDRReason(row["reason"]), filed_at=datetime.fromisoformat(row["filed_at"]),
+            status=TDRStatus(row["status"]),
+            claimed={int(k): Decimal(v) for k, v in json.loads(row["claimed"]).items()},
+            note=row["note"],
+            settled_at=datetime.fromisoformat(row["settled_at"]) if row["settled_at"] else None)
+
+    def get_tdr(self, tdr_id: int) -> TDR | None:
+        row = self._conn.execute("SELECT * FROM tdrs WHERE id = ?", (tdr_id,)).fetchone()
+        return self._tdr(row) if row else None
+
+    def tdrs_for_pnr(self, pnr: str) -> list[TDR]:
+        return [self._tdr(r) for r in self._conn.execute("SELECT * FROM tdrs WHERE pnr = ? ORDER BY id", (pnr,))]
+
+    # -------------------------------------------------------------- idempotency
+    def idempotent_pnr(self, key: str) -> str | None:
+        row = self._conn.execute("SELECT pnr FROM idempotency_keys WHERE key = ?", (key,)).fetchone()
+        return row[0] if row else None
+
+    def remember_idempotent(self, key: str, pnr: str) -> None:
+        with self.transaction():
+            self._conn.execute("INSERT INTO idempotency_keys VALUES (?,?)", (key, pnr))
