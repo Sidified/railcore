@@ -30,6 +30,11 @@ STATUS_CHANGED = "passenger.status_changed"
 WAITLIST_DROPPED = "passenger.waitlist_dropped"
 CHART_PREPARED = "chart.prepared"
 QUOTA_RELEASED = "quota.released"
+BOARDING_CHANGED = "booking.boarding_changed"
+TRAIN_CANCELLED = "run.cancelled"
+DELAY_REPORTED = "run.delay_reported"
+TDR_FILED = "tdr.filed"
+TDR_SETTLED = "tdr.settled"
 
 Handler = Callable[[Event], None]
 

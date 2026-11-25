@@ -27,8 +27,18 @@ from ..ids import make_pnr
 from ..inventory import ChartState, ClassInventory, Move
 from ..refunds import CancellationPolicy, RefundQuote
 from ..storage.base import Repository, RunMeta
+from .changes import Changes as _Changes
+from .disruptions import DisruptionsMixin
+from .reports import ReportsMixin
 from .requests import BookingRequest
 from .validation import BookingRules
+
+
+def _same_request(booking: Booking, request: BookingRequest) -> bool:
+    return (booking.train_number == request.train_number and booking.start_date == request.start_date
+            and booking.from_station == request.from_station and booking.to_station == request.to_station
+            and booking.travel_class.value == request.travel_class and booking.quota.value == request.quota
+            and [p.passenger.name for p in booking.passengers] == [p.name.strip() for p in request.passengers])
 
 
 @dataclass
@@ -52,30 +62,7 @@ class ChartResult:
     released: dict[str, dict[str, int]] = field(default_factory=dict)
 
 
-class _Changes:
-    """Bookings touched during one operation, saved together at the end."""
-
-    def __init__(self, repo: Repository):
-        self.repo = repo
-        self.bookings: dict[str, Booking] = {}
-
-    def get(self, pnr: str) -> Booking:
-        if pnr not in self.bookings:
-            found = self.repo.get_booking(pnr)
-            if found is None:
-                raise NotFound(f"no booking with PNR {pnr}")
-            self.bookings[pnr] = found
-        return self.bookings[pnr]
-
-    def add(self, booking: Booking) -> None:
-        self.bookings[booking.pnr] = booking
-
-    def save(self) -> None:
-        for booking in self.bookings.values():
-            self.repo.save_booking(booking)
-
-
-class BookingService:
+class BookingService(DisruptionsMixin, ReportsMixin):
     def __init__(self, repo: Repository, *, network: Network | None = None, clock: Clock | None = None,
                  config: Config | None = None, bus: EventBus | None = None):
         self.config = config or default_config()
@@ -140,6 +127,8 @@ class BookingService:
     # ================================================================ charting
     def _ensure_charts(self, train: Train, start_date: date) -> RunMeta:
         meta = self.repo.get_run(train.number, start_date)
+        if meta.cancelled:
+            return meta
         now = self.clock.now()
         if meta.chart is ChartState.OPEN and now >= self.charts.first_chart_at(train, start_date):
             self._first_chart(train, start_date, meta)
@@ -185,6 +174,8 @@ class BookingService:
             raise ValidationError(f"train {train_number} does not run on {start_date.isoformat()}")
         with self.repo.transaction():
             meta = self.repo.get_run(train_number, start_date)
+            if meta.cancelled:
+                raise InvalidState("the train run was cancelled")
             if kind == "first":
                 if meta.chart is not ChartState.OPEN:
                     raise InvalidState("first chart already prepared")
@@ -212,6 +203,8 @@ class BookingService:
             raise ValidationError(f"train {train_number} has no {cls.value} coaches")
         with self.repo.transaction():
             meta = self._ensure_charts(train, start_date)
+            if meta.cancelled:
+                return "TRAIN CANCELLED"
             return self._inventory(train, start_date, cls, meta.chart).availability(q)
 
     def quote(self, train_number: str, start_date: date, from_station: str, to_station: str,
@@ -239,7 +232,25 @@ class BookingService:
         return self.repo.get_booking(pnr)
 
     # ================================================================ booking
-    def book(self, request: BookingRequest) -> Booking:
+    def book(self, request: BookingRequest, idempotency_key: str | None = None) -> Booking:
+        """Make a booking. With an idempotency key, repeating the same request returns the
+        first booking instead of booking again (safe retries after a network error)."""
+        if idempotency_key is not None:
+            if not idempotency_key.strip() or len(idempotency_key) > 100:
+                raise ValidationError("idempotency key must be 1 to 100 characters")
+            with self.repo.transaction():
+                existing = self.repo.idempotent_pnr(idempotency_key)
+                if existing is not None:
+                    booking = self.repo.get_booking(existing)
+                    if not _same_request(booking, request):
+                        raise ValidationError("idempotency key was already used for a different booking")
+                    return booking
+                booking = self._book(request)
+                self.repo.remember_idempotent(idempotency_key, booking.pnr)
+                return booking
+        return self._book(request)
+
+    def _book(self, request: BookingRequest) -> Booking:
         train = self.network.train(request.train_number)
         cls, quota = request.parsed_class(), request.parsed_quota()
         passengers = [p.to_passenger() for p in request.passengers]
@@ -249,6 +260,8 @@ class BookingService:
         now = self.clock.now()
         with self.repo.transaction():
             meta = self._ensure_charts(train, request.start_date)
+            if meta.cancelled:
+                raise BookingClosed("this train run is cancelled")
             self.rules.check_dates(train, request.start_date, request.from_station, now, cls, quota)
             if meta.chart is ChartState.FINAL:
                 raise BookingClosed("final chart prepared; booking is closed")
@@ -306,10 +319,23 @@ class BookingService:
     def _refund_quotes(self, booking: Booking, records: list[PassengerRecord]) -> dict[int, RefundQuote]:
         train = self.network.train(booking.train_number)
         meta = self.repo.get_run(train.number, booking.start_date)
-        departure = train.departure(booking.from_station, booking.start_date)
+        departure = train.departure(booking.boards_at, booking.start_date)
         now = self.clock.now()
+        if meta.cancelled:
+            raise InvalidState("the train run was cancelled; every passenger was refunded automatically")
         if now >= departure:
             raise BookingClosed("the train has left the boarding station; file a TDR instead")
+        if booking.boarding_station is not None:
+            # RailCore assumption A3: changing the boarding point gives up the refund on a confirmed berth
+            return {
+                p.index: (self.cancellation.none(p.fare, "boarding point was changed: no refund on a confirmed berth")
+                          if p.current_status.kind is StatusKind.CONFIRMED else
+                          self.cancellation.quote(fare=p.fare, status=p.current_status.kind,
+                                                  travel_class=booking.travel_class, quota=booking.quota,
+                                                  departure=departure, now=now,
+                                                  charted=meta.chart is not ChartState.OPEN))
+                for p in records
+            }
         return {
             p.index: self.cancellation.quote(
                 fare=p.fare, status=p.current_status.kind, travel_class=booking.travel_class,
@@ -325,6 +351,8 @@ class BookingService:
                 raise NotFound(f"no booking with PNR {pnr}")
             train = self.network.train(existing.train_number)
             meta = self._ensure_charts(train, existing.start_date)
+            if meta.cancelled:
+                raise InvalidState("the train run was cancelled; every passenger was refunded automatically")
             changes = _Changes(self.repo)
             booking = changes.get(pnr)
             records = self._select(booking, passengers)
