@@ -40,12 +40,13 @@ class BookingRules:
                 if p.age < self.senior_age[p.gender]:
                     raise ValidationError(f"{p.name} is not eligible for the senior lower-berth quota")
 
-    def check_class_and_quota(self, train: Train, travel_class: TravelClass, quota: Quota,
-                              pool_size: int) -> None:
+    def check_class(self, train: Train, travel_class: TravelClass, quota: Quota) -> None:
         if not train.carries(travel_class):
             raise ValidationError(f"train {train.number} has no {travel_class.value} coaches")
         if quota.is_tatkal and travel_class not in self.tatkal_classes:
             raise ValidationError(f"{quota.value} is not available in class {travel_class.value}")
+
+    def check_quota_pool(self, travel_class: TravelClass, quota: Quota, pool_size: int) -> None:
         if quota is not Quota.GENERAL and pool_size == 0:
             raise ValidationError(f"no {quota.value} quota in class {travel_class.value} on this train")
 

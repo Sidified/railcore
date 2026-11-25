@@ -235,6 +235,7 @@ class BookingService:
         passengers = [p.to_passenger() for p in request.passengers]
         train.check_segment(request.from_station, request.to_station)
         self.rules.check_passengers(quota, passengers)
+        self.rules.check_class(train, cls, quota)
         now = self.clock.now()
         with self.repo.transaction():
             meta = self._ensure_charts(train, request.start_date)
@@ -244,8 +245,7 @@ class BookingService:
             if meta.chart is ChartState.FIRST and quota is not Quota.GENERAL:
                 raise BookingClosed("after charting only current (general) booking is open")
             inv = self._inventory(train, request.start_date, cls, meta.chart)
-            pool = inv.pool_size(quota) if quota is not Quota.GENERAL else 1
-            self.rules.check_class_and_quota(train, cls, quota, pool)
+            self.rules.check_quota_pool(cls, quota, inv.pool_size(quota))
             pnr = make_pnr(self.repo.next_pnr_sequence())
             refs = [PassengerRef(pnr, i + 1) for i in range(len(passengers))]
             pt_before, pt_pool = inv.pt_sold, inv.pool_size(Quota.PREMIUM_TATKAL)
@@ -256,7 +256,7 @@ class BookingService:
                 fare = self.fares.fare(train, request.from_station, request.to_station, cls, quota,
                                        pt_before + i, pt_pool)
                 booking.passengers.append(PassengerRecord(
-                    index=i + 1, passenger=pax, booking_status=alloc.status,
+                    index=i + 1, passenger=pax, booking_status=alloc.booking_status,
                     current_status=alloc.status, fare=fare.total, pool=alloc.pool))
             self.repo.save_booking(booking)
             self._publish(BOOKING_CREATED, pnr=pnr, train=train.number, start_date=request.start_date.isoformat(),

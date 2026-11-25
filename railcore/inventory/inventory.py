@@ -41,8 +41,13 @@ class Move:
 
 @dataclass(frozen=True)
 class Allocation:
-    status: SeatStatus
+    status: SeatStatus  # current status (RAC/WL number = position in the queue)
     pool: Quota | None
+    booked_as: SeatStatus | None = None  # status printed on the ticket (issued RAC/WL number)
+
+    @property
+    def booking_status(self) -> SeatStatus:
+        return self.booked_as or self.status
 
 
 class ClassInventory:
@@ -232,13 +237,17 @@ class ClassInventory:
         self.rac_slots[key].append(ref)
         self.rac_queue.append(ref)
         self.rac_issued += 1
-        return Allocation(SeatStatus(StatusKind.RAC, key[0], key[1], self.berths[key].type,
-                                     rac_number=self.rac_issued), None)
+        btype = self.berths[key].type
+        return Allocation(
+            SeatStatus(StatusKind.RAC, key[0], key[1], btype, rac_number=len(self.rac_queue)), None,
+            SeatStatus(StatusKind.RAC, key[0], key[1], btype, rac_number=self.rac_issued))
 
     def _waitlist(self, ref: PassengerRef, wl: WaitlistType) -> Allocation:
         self.waitlists[wl].append(ref)
         self.wl_issued[wl] += 1
-        return Allocation(SeatStatus(StatusKind.WAITLISTED, waitlist=wl, wl_number=self.wl_issued[wl]), None)
+        return Allocation(
+            SeatStatus(StatusKind.WAITLISTED, waitlist=wl, wl_number=len(self.waitlists[wl])), None,
+            SeatStatus(StatusKind.WAITLISTED, waitlist=wl, wl_number=self.wl_issued[wl]))
 
     # ----------------------------------------------------- cancellation/promotion
     def release(self, refs: Iterable[PassengerRef]) -> list[Move]:
