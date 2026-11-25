@@ -122,3 +122,46 @@ def test_regret_is_conflict(client):
         client.post("/bookings", dict(BOOK, **{"class": "1A"}, passengers=[one] * 6))
     status, body = client.post("/bookings", dict(BOOK, **{"class": "1A"}, passengers=[one]))
     assert (status, body["error"]) == (409, "no_availability")
+
+
+def test_idempotency_header(client):
+    def post(key):
+        raw = json.dumps(BOOK).encode()
+        environ = {"REQUEST_METHOD": "POST", "PATH_INFO": "/bookings", "QUERY_STRING": "",
+                   "CONTENT_LENGTH": str(len(raw)), "wsgi.input": io.BytesIO(raw), "HTTP_IDEMPOTENCY_KEY": key}
+        out = {}
+        body = json.loads(b"".join(client.app(environ, lambda s, h: out.update(status=int(s.split()[0])))))
+        return out["status"], body
+    s1, b1 = post("order-77")
+    s2, b2 = post("order-77")
+    assert (s1, s2) == (201, 200) and b1["pnr"] == b2["pnr"]
+
+
+def test_boarding_tdr_and_settle(client, clock):
+    from datetime import datetime
+    _, booking = client.post("/bookings", dict(BOOK, **{"class": "3A", "to": "NGP"}))
+    pnr = booking["pnr"]
+    status, changed = client.post(f"/bookings/{pnr}/boarding", {"station": "AGC"})
+    assert status == 200 and changed["boarding"] == "AGC"
+    assert client.post(f"/bookings/{pnr}/boarding", {})[0] == 400
+    assert client.post("/runs/22401/2026-12-10/delays", {"station": "NGP", "arrival_delay": 30})[0] == 200
+    assert client.post("/runs/22401/2026-12-10/delays", {"station": "NGP", "arrival_delay": "x"})[0] == 400
+    clock.set(datetime(2026, 12, 11, 14, 0))
+    status, tdr = client.post(f"/bookings/{pnr}/tdr", {"reason": "AC_FAILURE"})
+    assert status == 201 and tdr["claimed"] == {"1": "1005.00", "2": "1005.00"}
+    assert client.get(f"/bookings/{pnr}/tdrs")[1][0]["id"] == tdr["id"]
+    assert client.post(f"/tdrs/{tdr['id']}/settle", {"approve": "yes"})[0] == 400
+    status, settled = client.post(f"/tdrs/{tdr['id']}/settle", {"approve": True, "note": "ok"})
+    assert settled["status"] == "REFUNDED"
+    assert client.get(f"/bookings/{pnr}")[1]["total_refund"] == "2010.00"
+
+
+def test_run_endpoints(client):
+    client.post("/bookings", BOOK)
+    status, report = client.get("/runs/22401/2026-12-10/chart", "class=SL")
+    assert status == 200 and report["summary"]["confirmed"] == 2
+    assert client.get("/runs/22401/2026-12-10/chart")[0] == 400
+    assert client.get("/runs/22401/2026-12-10/occupancy")[1]["SL"]["confirmed"] == 2
+    status, body = client.post("/runs/22401/2026-12-10/cancel", {"reason": "strike"})
+    assert body["refunded_passengers"] == 2
+    assert client.post("/runs/22401/2026-12-10/cancel", {})[0] == 409

@@ -38,3 +38,18 @@ def test_queries(tmp_path, capsys):
 def test_errors_exit_non_zero(tmp_path, capsys):
     code, err = run(capsys, tmp_path / "cli.db", "pnr", "2999999999")
     assert code == 1 and err["error"] == "not_found"
+
+
+def test_disruption_commands(tmp_path, capsys):
+    db = tmp_path / "cli.db"
+    _, booking = run(capsys, db, "book", "22401", "2026-12-10", "BPL", "NGP", "3A", "-p", "Asha,30,F")
+    pnr = booking["pnr"]
+    assert run(capsys, db, "boarding", pnr, "ET")[1]["boarding"] == "ET"
+    assert run(capsys, db, "delay", "22401", "2026-12-10", "ET", "--departure", "200")[1]["departure_delay"] == 200
+    code = main(["--db", str(db), "--now", "2026-12-11T08:00", "tdr", pnr, "TRAIN_LATE_NOT_TRAVELLED"])
+    tdr = json.loads(capsys.readouterr().out)
+    assert code == 0 and tdr["status"] == "FILED"
+    assert run(capsys, db, "settle-tdr", str(tdr["id"]), "--approve")[1]["status"] == "REFUNDED"
+    report = run(capsys, db, "chart-report", "22401", "2026-12-10", "3A")[1]
+    assert report["summary"]["confirmed"] == 0
+    assert run(capsys, db, "cancel-run", "22401", "2026-12-10")[1] == {"refunded_passengers": 0}

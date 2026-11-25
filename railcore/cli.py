@@ -7,6 +7,12 @@
     railcore pnr 2000000014
     railcore cancel 2000000014 --passengers 2
     railcore chart 22401 2026-12-10 --kind first
+    railcore boarding 2000000014 AGC
+    railcore cancel-run 22401 2026-12-10 --reason "track work"
+    railcore delay 22401 2026-12-10 BPL --departure 200
+    railcore tdr 2000000014 TRAIN_LATE_NOT_TRAVELLED --passengers 1
+    railcore settle-tdr 1 --approve
+    railcore chart-report 22401 2026-12-10 3A
     railcore events --after 0
     railcore serve --port 8000
 
@@ -94,6 +100,33 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("train"), p.add_argument("date", type=_date)
     p.add_argument("--kind", choices=["first", "final"], default="first")
 
+    p = sub.add_parser("boarding", help="change the boarding station")
+    p.add_argument("pnr"), p.add_argument("station")
+
+    p = sub.add_parser("cancel-run", help="cancel a whole train run (full refunds)")
+    p.add_argument("train"), p.add_argument("date", type=_date)
+    p.add_argument("--reason", default="")
+
+    p = sub.add_parser("delay", help="report a delay at a station (minutes)")
+    p.add_argument("train"), p.add_argument("date", type=_date), p.add_argument("station")
+    p.add_argument("--arrival", type=int, default=0)
+    p.add_argument("--departure", type=int, default=0)
+
+    p = sub.add_parser("tdr", help="file a TDR")
+    p.add_argument("pnr")
+    p.add_argument("reason", choices=["TRAIN_LATE_NOT_TRAVELLED", "AC_FAILURE", "RAC_NOT_TRAVELLED"])
+    p.add_argument("--passengers", type=lambda s: [int(x) for x in s.split(",")])
+
+    p = sub.add_parser("settle-tdr", help="approve or reject a TDR")
+    p.add_argument("tdr_id", type=int)
+    group = p.add_mutually_exclusive_group(required=True)
+    group.add_argument("--approve", action="store_true")
+    group.add_argument("--reject", action="store_true")
+    p.add_argument("--note", default="")
+
+    p = sub.add_parser("chart-report", help="coach-wise reservation chart")
+    p.add_argument("train"), p.add_argument("date", type=_date), p.add_argument("travel_class")
+
     p = sub.add_parser("events", help="show the event log")
     p.add_argument("--after", type=int, default=0)
     p.add_argument("--limit", type=int, default=100)
@@ -134,6 +167,19 @@ def run(args: argparse.Namespace, service: BookingService) -> Any:
         result = service.prepare_chart(args.train, args.date, args.kind)
         return {"kind": result.kind, "moved": len(result.moves),
                 "dropped": [str(r) for r in result.dropped], "released": result.released}
+    if c == "boarding":
+        return serialize.booking(service.change_boarding(args.pnr, args.station))
+    if c == "cancel-run":
+        return {"refunded_passengers": service.cancel_run(args.train, args.date, args.reason)}
+    if c == "delay":
+        service.report_delay(args.train, args.date, args.station, args.arrival, args.departure)
+        return {"station": args.station, "arrival_delay": args.arrival, "departure_delay": args.departure}
+    if c == "tdr":
+        return serialize.tdr(service.file_tdr(args.pnr, args.reason, args.passengers))
+    if c == "settle-tdr":
+        return serialize.tdr(service.settle_tdr(args.tdr_id, args.approve, args.note))
+    if c == "chart-report":
+        return service.chart_report(args.train, args.date, args.travel_class)
     if c == "events":
         return [e.as_dict() for e in service.repo.events(args.after, args.limit)]
     raise AssertionError(c)  # pragma: no cover

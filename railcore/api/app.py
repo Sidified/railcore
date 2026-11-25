@@ -9,8 +9,19 @@
     GET  /bookings/{pnr}
     GET  /bookings/{pnr}/refund          ?passengers=1,2
     POST /bookings/{pnr}/cancel          {passengers: [1, 2]}   (omit to cancel all)
+    POST /bookings/{pnr}/boarding        {station}
+    POST /bookings/{pnr}/tdr             {reason, passengers: [1]}
+    GET  /bookings/{pnr}/tdrs
+    POST /tdrs/{id}/settle               {approve: true, note}
     POST /runs/{train}/{date}/chart      {kind: "first" | "final"}
+    GET  /runs/{train}/{date}/chart      ?class=3A   (coach-wise reservation chart)
+    GET  /runs/{train}/{date}/occupancy
+    POST /runs/{train}/{date}/cancel     {reason}
+    POST /runs/{train}/{date}/delays     {station, arrival_delay, departure_delay}
     GET  /events                         ?after=0&limit=100
+
+POST /bookings accepts an Idempotency-Key header: repeating a request with
+the same key returns the first booking (200) instead of booking again.
 """
 from __future__ import annotations
 
@@ -45,6 +56,7 @@ class HTTPError(Exception):
 class Request:
     def __init__(self, environ: dict):
         self.method = environ["REQUEST_METHOD"].upper()
+        self.headers = {k[5:].replace("_", "-").lower(): v for k, v in environ.items() if k.startswith("HTTP_")}
         self.path = environ.get("PATH_INFO", "/") or "/"
         self.query = {k: v[-1] for k, v in parse_qs(environ.get("QUERY_STRING", "")).items()}
         self._environ = environ
@@ -113,7 +125,16 @@ class RailCoreApp:
         add("GET", r"/bookings/(?P<pnr>\d{10})", self.get_booking)
         add("GET", r"/bookings/(?P<pnr>\d{10})/refund", self.refund_quote)
         add("POST", r"/bookings/(?P<pnr>\d{10})/cancel", self.cancel)
-        add("POST", r"/runs/(?P<train>\d+)/(?P<day>\d{4}-\d{2}-\d{2})/chart", self.chart)
+        add("POST", r"/bookings/(?P<pnr>\d{10})/boarding", self.change_boarding)
+        add("POST", r"/bookings/(?P<pnr>\d{10})/tdr", self.file_tdr)
+        add("GET", r"/bookings/(?P<pnr>\d{10})/tdrs", self.list_tdrs)
+        add("POST", r"/tdrs/(?P<tdr_id>\d+)/settle", self.settle_tdr)
+        run = r"/runs/(?P<train>\d+)/(?P<day>\d{4}-\d{2}-\d{2})"
+        add("POST", run + "/chart", self.chart)
+        add("GET", run + "/chart", self.chart_report)
+        add("GET", run + "/occupancy", self.occupancy)
+        add("POST", run + "/cancel", self.cancel_run)
+        add("POST", run + "/delays", self.report_delay)
         add("GET", r"/events", self.events)
 
     def _add(self, method: str, pattern: str, handler: Handler) -> None:
@@ -195,10 +216,12 @@ class RailCoreApp:
             except (TypeError, ValueError):
                 raise HTTPError(HTTPStatus.BAD_REQUEST, "bad_field", f"passenger {i} age must be a number") from None
             passengers.append(PassengerInput(str(p["name"]), age, str(p["gender"]), p.get("berth_preference")))
+        key = request.headers.get("idempotency-key")
+        replay = key is not None and self.service.repo.idempotent_pnr(key) is not None
         booking = self.service.book(BookingRequest(
             str(body["train"]), _date(body["date"]), str(body["from"]), str(body["to"]),
-            str(body["class"]), str(body.get("quota", "GN")), passengers))
-        return HTTPStatus.CREATED, serialize.booking(booking)
+            str(body["class"]), str(body.get("quota", "GN")), passengers), idempotency_key=key)
+        return (HTTPStatus.OK if replay else HTTPStatus.CREATED), serialize.booking(booking)
 
     def get_booking(self, request: Request, pnr: str):
         return HTTPStatus.OK, serialize.booking(self.service.get_booking(pnr))
@@ -235,3 +258,47 @@ class RailCoreApp:
         except ValueError:
             raise HTTPError(HTTPStatus.BAD_REQUEST, "bad_parameter", "after and limit must be numbers") from None
         return HTTPStatus.OK, [e.as_dict() for e in self.service.repo.events(after, limit)]
+
+    def change_boarding(self, request: Request, pnr: str):
+        body = request.json()
+        _required(body, "station")
+        return HTTPStatus.OK, serialize.booking(self.service.change_boarding(pnr, str(body["station"])))
+
+    def file_tdr(self, request: Request, pnr: str):
+        body = request.json()
+        _required(body, "reason")
+        tdr = self.service.file_tdr(pnr, str(body["reason"]), _int_list(body.get("passengers"), "passengers"))
+        return HTTPStatus.CREATED, serialize.tdr(tdr)
+
+    def list_tdrs(self, request: Request, pnr: str):
+        return HTTPStatus.OK, [serialize.tdr(t) for t in self.service.tdrs(pnr)]
+
+    def settle_tdr(self, request: Request, tdr_id: str):
+        body = request.json()
+        _required(body, "approve")
+        if not isinstance(body["approve"], bool):
+            raise HTTPError(HTTPStatus.BAD_REQUEST, "bad_field", "approve must be true or false")
+        tdr = self.service.settle_tdr(int(tdr_id), body["approve"], str(body.get("note", "")))
+        return HTTPStatus.OK, serialize.tdr(tdr)
+
+    def chart_report(self, request: Request, train: str, day: str):
+        return HTTPStatus.OK, self.service.chart_report(train, _date(day), request.arg("class"))
+
+    def occupancy(self, request: Request, train: str, day: str):
+        return HTTPStatus.OK, self.service.occupancy(train, _date(day))
+
+    def cancel_run(self, request: Request, train: str, day: str):
+        body = request.json()
+        count = self.service.cancel_run(train, _date(day), str(body.get("reason", "")))
+        return HTTPStatus.OK, {"train": train, "start_date": day, "refunded_passengers": count}
+
+    def report_delay(self, request: Request, train: str, day: str):
+        body = request.json()
+        _required(body, "station")
+        try:
+            arr, dep = int(body.get("arrival_delay", 0)), int(body.get("departure_delay", 0))
+        except (TypeError, ValueError):
+            raise HTTPError(HTTPStatus.BAD_REQUEST, "bad_field", "delays must be numbers of minutes") from None
+        self.service.report_delay(train, _date(day), str(body["station"]), arr, dep)
+        return HTTPStatus.OK, {"train": train, "start_date": day, "station": body["station"],
+                               "arrival_delay": arr, "departure_delay": dep}

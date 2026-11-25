@@ -8,6 +8,7 @@ from ..domain.booking import Booking, PassengerRecord, SeatStatus
 from ..domain.network import Train
 from ..fares import FareBreakdown
 from ..refunds import RefundQuote
+from ..tdr import TDR
 
 
 def money(value: Decimal | None) -> str | None:
@@ -51,11 +52,19 @@ def booking(b: Booking) -> dict[str, Any]:
         "class": b.travel_class.value,
         "quota": b.quota.value,
         "booked_at": b.booked_at.isoformat(),
+        "boarding": b.boards_at,
         "state": b.state.value,
         "total_fare": money(b.total_fare),
         "total_refund": money(b.total_refund),
         "passengers": [passenger(p) for p in b.passengers],
     }
+
+
+def tdr(t: TDR) -> dict[str, Any]:
+    return {"id": t.id, "pnr": t.pnr, "passengers": t.passengers, "reason": t.reason.value,
+            "status": t.status.value, "filed_at": t.filed_at.isoformat(),
+            "claimed": {str(k): str(v) for k, v in t.claimed.items()}, "total": str(t.total),
+            "note": t.note, "settled_at": t.settled_at.isoformat() if t.settled_at else None}
 
 
 def fare(f: FareBreakdown) -> dict[str, Any]:
